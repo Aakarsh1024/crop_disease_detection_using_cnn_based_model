@@ -93,9 +93,9 @@ export default function LiveDemo() {
     [handleFile]
   );
 
-  const callPredictAPI = useCallback(async (fileOrBlob) => {
+  const callPredictAPI = useCallback(async (fileOrBlob, filename) => {
     const formData = new FormData();
-    formData.append("file", fileOrBlob, fileOrBlob.name || "image.png");
+    formData.append("file", fileOrBlob, filename || fileOrBlob.name || "image.png");
 
     const res = await fetch("/api/predict", {
       method: "POST",
@@ -143,7 +143,7 @@ export default function LiveDemo() {
         setShiftLoading(true);
         try {
           const blob = await applyDomainShift(image, next);
-          const data = await callPredictAPI(blob);
+          const data = await callPredictAPI(blob, image.name);
           setPredictions(data.predictions || []);
           setGradcam(data.gradcam || null);
         } catch {

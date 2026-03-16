@@ -60,7 +60,6 @@ function buildChartData(models) {
     acc: `${m.accuracy}%`,
     params: m.parameters,
     time: `${m.inference_time_ms}ms`,
-    notes: "",
   }));
 
   return { radarData, barData, comparison };
