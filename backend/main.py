@@ -15,14 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import hf_hub_download
 from PIL import Image
 
-from backend.model.predict import (
+from model.predict import (
     predict,
     preprocess_image,
     get_model_and_layer,
     CLASS_NAMES,
     format_class_name,
 )
-from backend.utils.gradcam import generate_gradcam_base64
+from utils.gradcam import generate_gradcam_base64
 
 app = FastAPI(
     title="Crop Disease Detection API",
