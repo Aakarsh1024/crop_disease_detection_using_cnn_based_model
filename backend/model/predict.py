@@ -8,16 +8,18 @@ mock-data fallback when no trained weights are available.
 
 import os
 import random
+import json
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision import transforms, models
 from PIL import Image
+from huggingface_hub import hf_hub_download
 
 
 # 38 PlantVillage disease classes
-CLASS_NAMES = [
+DEFAULT_CLASS_NAMES = [
     "Apple___Apple_scab",
     "Apple___Black_rot",
     "Apple___Cedar_apple_rust",
@@ -58,10 +60,14 @@ CLASS_NAMES = [
     "Tomato___healthy",
 ]
 
+CLASS_NAMES = DEFAULT_CLASS_NAMES
 NUM_CLASSES = len(CLASS_NAMES)
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "weights")
 MODEL_PATH = os.path.join(MODEL_DIR, "efficientnet_b0_plant.pth")
+HF_REPO_ID = "aakarshhhhh/cropguard-model"
+HF_MODEL_FILENAME = "efficientnet_b0_plant.pth"
+HF_CLASS_NAMES_FILENAME = "class_names.json"
 
 # ImageNet normalization constants used by torchvision pretrained models
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -77,6 +83,36 @@ preprocess = transforms.Compose([
 # Module-level model cache
 _model = None
 _using_mock = False
+
+
+def _initialize_assets() -> None:
+    """Download model weights and class names from HuggingFace."""
+    global CLASS_NAMES, NUM_CLASSES, MODEL_PATH
+
+    os.makedirs(MODEL_DIR, exist_ok=True)
+
+    try:
+        MODEL_PATH = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=HF_MODEL_FILENAME,
+            local_dir=MODEL_DIR,
+        )
+    except Exception:
+        pass
+
+    try:
+        class_names_path = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=HF_CLASS_NAMES_FILENAME,
+            local_dir=MODEL_DIR,
+        )
+        with open(class_names_path, "r", encoding="utf-8") as f:
+            class_names = json.load(f)
+        if isinstance(class_names, list) and class_names:
+            CLASS_NAMES = class_names
+            NUM_CLASSES = len(CLASS_NAMES)
+    except Exception:
+        pass
 
 
 def format_class_name(raw: str) -> str:
@@ -216,3 +252,6 @@ def _mock_predictions(top_k: int = 5) -> list[dict]:
         {"disease": name, "confidence": conf}
         for name, conf in zip(names, confidences)
     ]
+
+
+_initialize_assets()
