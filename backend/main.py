@@ -7,10 +7,12 @@ comparison data, and dataset statistics.
 
 import io
 import traceback
+import json
 
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from huggingface_hub import hf_hub_download
 from PIL import Image
 
 from backend.model.predict import (
@@ -27,6 +29,8 @@ app = FastAPI(
     description="Backend API for crop disease detection using EfficientNet-B0",
     version="1.0.0",
 )
+
+HF_REPO_ID = "aakarshhhhh/cropguard-model"
 
 # ---------------------------------------------------------------------------
 # CORS – allow the React frontend (and any other origin during development)
@@ -109,7 +113,7 @@ async def get_models():
     models_data = [
         {
             "name": "EfficientNet-B0",
-            "accuracy": 96.5,
+            "accuracy": 99.81,
             "precision": 96.2,
             "recall": 96.0,
             "f1_score": 96.1,
@@ -155,6 +159,25 @@ async def get_models():
     ]
 
     return {"models": models_data}
+
+
+@app.get("/api/results")
+async def get_results():
+    """
+    Return full evaluation metrics from HuggingFace-hosted results.
+    """
+    try:
+        results_path = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename="real_results.json",
+        )
+        with open(results_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load results data.",
+        )
 
 
 # ---------------------------------------------------------------------------
