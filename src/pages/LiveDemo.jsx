@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { API_URL } from "../config";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
@@ -97,7 +98,7 @@ export default function LiveDemo() {
     const formData = new FormData();
     formData.append("file", fileOrBlob, filename || fileOrBlob.name || "image.png");
 
-    const res = await fetch("/api/predict", {
+    const res = await fetch(`${API_URL}/api/predict`, {
       method: "POST",
       body: formData,
     });
