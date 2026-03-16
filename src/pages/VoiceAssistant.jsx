@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 
 const fadeUp = {
@@ -10,80 +11,189 @@ const fadeUp = {
   }),
 };
 
+const COMMANDS = {
+  home: { path: "/", response: "Navigating to the home page." },
+  abstract: { path: "/abstract", response: "Opening the abstract page." },
+  methodology: { path: "/methodology", response: "Opening the methodology page." },
+  dataset: { path: "/dataset", response: "Opening the dataset page." },
+  results: { path: "/results", response: "Navigating to the results page." },
+  demo: { path: "/live-demo", response: "Opening the live demo page." },
+  comparison: { path: "/comparison", response: "Opening the comparison page." },
+};
+
 const commandExamples = [
-  { cmd: "Show results", desc: "Navigate to model results" },
-  { cmd: "Upload image", desc: "Open the live demo page" },
-  { cmd: "Compare models", desc: "View model comparison" },
-  { cmd: "Show dataset info", desc: "Navigate to dataset page" },
-  { cmd: "Go to methodology", desc: "View methodology" },
-  { cmd: "Go home", desc: "Return to home page" },
+  { cmd: "Go to home", desc: "Navigate to the home page", category: "Navigation" },
+  { cmd: "Go to abstract", desc: "Open the abstract page", category: "Navigation" },
+  { cmd: "Go to methodology", desc: "View methodology", category: "Navigation" },
+  { cmd: "Go to dataset", desc: "Navigate to dataset page", category: "Navigation" },
+  { cmd: "Go to results", desc: "Navigate to model results", category: "Navigation" },
+  { cmd: "Go to demo", desc: "Open the live demo", category: "Navigation" },
+  { cmd: "Go to comparison", desc: "View model comparison", category: "Navigation" },
+  { cmd: "What is this project about", desc: "Hear the project abstract", category: "Information" },
+  { cmd: "How accurate is your model", desc: "Hear accuracy stats", category: "Information" },
+  { cmd: "Start demo", desc: "Jump to the live demo", category: "Shortcut" },
+  { cmd: "Open comparison", desc: "Jump to model comparison", category: "Shortcut" },
+  { cmd: "Help", desc: "List all available commands", category: "Utility" },
 ];
 
+function processCommand(text) {
+  const lower = text.toLowerCase().trim();
+  let navigateTo = null;
+
+  const goToMatch = lower.match(
+    /go\s+to\s+(home|abstract|methodology|dataset|results|demo|comparison)/
+  );
+  if (goToMatch) {
+    const page = goToMatch[1];
+    const cmd = COMMANDS[page];
+    return { response: cmd.response, navigateTo: cmd.path };
+  }
+
+  if (lower.includes("what is this project") || lower.includes("about")) {
+    return {
+      response:
+        "This project uses Convolutional Neural Networks to detect crop diseases from leaf images. " +
+        "It is trained on the PlantVillage dataset with over 54,000 images spanning 38 disease classes across 14 crop species.",
+      navigateTo: null,
+    };
+  }
+
+  if (lower.includes("accurate") || lower.includes("accuracy")) {
+    return {
+      response:
+        "Our CNN model achieves 96.5% accuracy on the test set, with an inference time of approximately 45 milliseconds per image.",
+      navigateTo: null,
+    };
+  }
+
+  if (lower.includes("start demo")) {
+    return { response: "Starting the live demo.", navigateTo: "/live-demo" };
+  }
+
+  if (lower.includes("open comparison")) {
+    return {
+      response: "Opening the model comparison page.",
+      navigateTo: "/comparison",
+    };
+  }
+
+  if (lower.includes("help")) {
+    return {
+      response:
+        'Available commands: "Go to home", "Go to abstract", "Go to methodology", "Go to dataset", "Go to results", "Go to demo", "Go to comparison", ' +
+        '"What is this project about", "How accurate is your model", "Start demo", "Open comparison", "Help".',
+      navigateTo: null,
+    };
+  }
+
+  if (lower.includes("result")) {
+    return { response: COMMANDS.results.response, navigateTo: COMMANDS.results.path };
+  }
+  if (lower.includes("demo") || lower.includes("upload") || lower.includes("predict")) {
+    return { response: COMMANDS.demo.response, navigateTo: COMMANDS.demo.path };
+  }
+  if (lower.includes("compar")) {
+    return { response: COMMANDS.comparison.response, navigateTo: COMMANDS.comparison.path };
+  }
+  if (lower.includes("dataset") || lower.includes("data")) {
+    return { response: COMMANDS.dataset.response, navigateTo: COMMANDS.dataset.path };
+  }
+  if (lower.includes("method")) {
+    return { response: COMMANDS.methodology.response, navigateTo: COMMANDS.methodology.path };
+  }
+  if (lower.includes("home")) {
+    return { response: COMMANDS.home.response, navigateTo: COMMANDS.home.path };
+  }
+  if (lower.includes("abstract")) {
+    return { response: COMMANDS.abstract.response, navigateTo: COMMANDS.abstract.path };
+  }
+
+  return {
+    response: 'Sorry, I didn\'t understand that. Say "help" to see available commands.',
+    navigateTo: null,
+  };
+}
+
+/* Animated waveform bars */
+function Waveform() {
+  return (
+    <div className="flex items-center justify-center gap-1 h-8">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <motion.div
+          key={i}
+          className="w-1 bg-[#00e676] rounded-full"
+          animate={{ height: ["8px", "24px", "8px"] }}
+          transition={{
+            duration: 0.6,
+            repeat: Infinity,
+            delay: i * 0.12,
+            ease: "easeInOut",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function VoiceAssistant() {
-  const [listening, setListening] = useState(false);
+  const navigate = useNavigate();
+  // "idle" | "listening" | "speaking"
+  const [status, setStatus] = useState("idle");
   const [transcript, setTranscript] = useState("");
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      text: "Hello! I'm CropGuard Voice Assistant. Try saying a command like \"Show results\" or \"Compare models\". Note: Voice recognition requires browser support.",
+      text: 'Hello! I\'m CropGuard Voice Assistant. Try saying a command like "Go to results" or "Help". Note: Voice recognition requires browser support.',
     },
   ]);
+  const [supported, setSupported] = useState(true);
   const messagesEndRef = useRef(null);
+  const recognitionRef = useRef(null);
+
+  useEffect(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) setSupported(false);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const processCommand = useCallback((text) => {
-    const lower = text.toLowerCase();
-    let response = `I heard: "${text}". `;
-
-    if (lower.includes("result")) {
-      response += 'Navigating to Results page. Our model achieves 96.5% accuracy!';
-    } else if (lower.includes("upload") || lower.includes("demo") || lower.includes("predict")) {
-      response += 'Opening Live Demo. You can upload a leaf image for instant prediction.';
-    } else if (lower.includes("compar")) {
-      response += 'Showing Model Comparison. Our CNN outperforms VGG-16 and matches ResNet-50.';
-    } else if (lower.includes("dataset") || lower.includes("data")) {
-      response += 'The PlantVillage dataset contains 54,303 images across 38 disease classes.';
-    } else if (lower.includes("method")) {
-      response += 'Our methodology uses a custom 6-layer CNN with batch normalization and dropout.';
-    } else if (lower.includes("home")) {
-      response += 'Returning to the home page.';
-    } else if (lower.includes("abstract")) {
-      response += 'Showing the research abstract and problem statement.';
-    } else {
-      response += 'I can help you navigate the app. Try "Show results", "Compare models", or "Upload image".';
-    }
-    return response;
+  const speak = useCallback((text) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    utterance.rate = 1;
+    utterance.onstart = () => setStatus("speaking");
+    utterance.onend = () => setStatus("idle");
+    utterance.onerror = () => setStatus("idle");
+    window.speechSynthesis.speak(utterance);
   }, []);
 
   const toggleListening = useCallback(() => {
-    if (listening) {
-      setListening(false);
+    if (status === "listening") {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      setStatus("idle");
+      return;
+    }
+
+    if (!supported) {
+      const msg =
+        "Speech recognition is not supported in your browser. Please try Chrome or Edge.";
+      setMessages((prev) => [...prev, { role: "assistant", text: msg }]);
       return;
     }
 
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: "Speech recognition is not supported in your browser. Please try Chrome or Edge.",
-        },
-      ]);
-      return;
-    }
-
     const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
-    recognition.onstart = () => setListening(true);
+    recognition.onstart = () => setStatus("listening");
 
     recognition.onresult = (event) => {
       const text = Array.from(event.results)
@@ -92,17 +202,22 @@ export default function VoiceAssistant() {
       setTranscript(text);
 
       if (event.results[0].isFinal) {
+        const { response, navigateTo } = processCommand(text);
         setMessages((prev) => [
           ...prev,
           { role: "user", text },
-          { role: "assistant", text: processCommand(text) },
+          { role: "assistant", text: response },
         ]);
         setTranscript("");
+        speak(response);
+        if (navigateTo) {
+          setTimeout(() => navigate(navigateTo), 600);
+        }
       }
     };
 
     recognition.onerror = () => {
-      setListening(false);
+      setStatus("idle");
       setMessages((prev) => [
         ...prev,
         {
@@ -112,10 +227,26 @@ export default function VoiceAssistant() {
       ]);
     };
 
-    recognition.onend = () => setListening(false);
+    recognition.onend = () => {
+      setStatus((prev) => (prev === "listening" ? "idle" : prev));
+    };
 
     recognition.start();
-  }, [listening, processCommand]);
+  }, [status, supported, speak, navigate]);
+
+  const statusLabel =
+    status === "listening"
+      ? "Listening..."
+      : status === "speaking"
+      ? "Speaking..."
+      : "Idle";
+
+  const statusColor =
+    status === "listening"
+      ? "text-[#00e676]"
+      : status === "speaking"
+      ? "text-[#c6f135]"
+      : "text-gray-500";
 
   return (
     <div className="min-h-screen py-20 px-4">
@@ -138,6 +269,42 @@ export default function VoiceAssistant() {
             Hands-free navigation and information using voice commands.
           </p>
         </motion.div>
+
+        {/* Status indicator */}
+        <motion.div
+          className="flex items-center justify-center gap-3 mb-6"
+          initial="hidden"
+          animate="visible"
+          variants={fadeUp}
+          custom={0.5}
+        >
+          <span
+            className={`inline-block w-2.5 h-2.5 rounded-full ${
+              status === "listening"
+                ? "bg-[#00e676] animate-pulse"
+                : status === "speaking"
+                ? "bg-[#c6f135] animate-pulse"
+                : "bg-gray-600"
+            }`}
+          />
+          <span className={`text-sm font-medium ${statusColor}`}>
+            {statusLabel}
+          </span>
+        </motion.div>
+
+        {/* Waveform */}
+        <AnimatePresence>
+          {status === "listening" && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-6"
+            >
+              <Waveform />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Chat area */}
         <motion.div
@@ -165,6 +332,9 @@ export default function VoiceAssistant() {
                         : "bg-gray-800 text-gray-300 rounded-bl-md"
                     }`}
                   >
+                    <span className="block text-[10px] uppercase tracking-wider mb-1 opacity-50">
+                      {m.role === "user" ? "You said" : "Assistant"}
+                    </span>
                     {m.text}
                   </div>
                 </motion.div>
@@ -186,20 +356,26 @@ export default function VoiceAssistant() {
             <button
               onClick={toggleListening}
               className={`relative p-5 rounded-full transition-all ${
-                listening
+                status === "listening"
                   ? "bg-[#00e676] text-gray-900 shadow-lg shadow-[#00e676]/30"
                   : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
               }`}
-              aria-label={listening ? "Stop listening" : "Start listening"}
+              aria-label={
+                status === "listening" ? "Stop listening" : "Start listening"
+              }
             >
-              {listening && (
+              {status === "listening" && (
                 <motion.div
                   className="absolute inset-0 rounded-full border-2 border-[#00e676]"
                   animate={{ scale: [1, 1.4], opacity: [0.6, 0] }}
                   transition={{ duration: 1.2, repeat: Infinity }}
                 />
               )}
-              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+              <svg
+                className="w-6 h-6"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
                 <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
                 <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
               </svg>
@@ -207,7 +383,7 @@ export default function VoiceAssistant() {
           </div>
         </motion.div>
 
-        {/* Command examples */}
+        {/* Available voice commands */}
         <motion.div
           initial="hidden"
           whileInView="visible"
@@ -216,7 +392,7 @@ export default function VoiceAssistant() {
           custom={2}
         >
           <h3 className="text-lg font-semibold mb-4 text-center text-gray-400">
-            Example Commands
+            Available Voice Commands
           </h3>
           <div className="grid sm:grid-cols-2 gap-3">
             {commandExamples.map((c, i) => (
@@ -227,16 +403,35 @@ export default function VoiceAssistant() {
                 whileInView="visible"
                 viewport={{ once: true }}
                 variants={fadeUp}
-                custom={i * 0.3}
+                custom={i * 0.15}
               >
-                <p className="font-medium text-sm text-[#00e676]">
-                  &quot;{c.cmd}&quot;
-                </p>
-                <p className="text-xs text-gray-500 mt-1">{c.desc}</p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="font-medium text-sm text-[#00e676]">
+                    &quot;{c.cmd}&quot;
+                  </p>
+                  <span className="text-[10px] uppercase tracking-wider text-gray-600 bg-gray-800 px-2 py-0.5 rounded-full">
+                    {c.category}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500">{c.desc}</p>
               </motion.div>
             ))}
           </div>
         </motion.div>
+
+        {/* Browser support notice */}
+        {!supported && (
+          <motion.div
+            className="mt-8 p-4 bg-red-900/20 border border-red-800/30 rounded-xl text-center text-sm text-red-400"
+            initial="hidden"
+            animate="visible"
+            variants={fadeUp}
+            custom={3}
+          >
+            Your browser does not support the Web Speech API. Please use Google
+            Chrome or Microsoft Edge for voice assistant features.
+          </motion.div>
+        )}
       </div>
     </div>
   );

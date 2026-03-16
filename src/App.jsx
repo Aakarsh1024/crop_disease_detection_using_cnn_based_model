@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import Navbar from "./components/Navbar";
+import FloatingMic from "./components/FloatingMic";
 import Home from "./pages/Home";
 import Abstract from "./pages/Abstract";
 import Methodology from "./pages/Methodology";
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/voice-assistant" element={<VoiceAssistant />} />
         </Routes>
       </main>
+      <FloatingMic />
     </div>
   );
 }
