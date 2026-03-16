@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const fadeUp = {
@@ -10,25 +10,78 @@ const fadeUp = {
   }),
 };
 
-const mockPredictions = [
-  { disease: "Tomato Late Blight", confidence: 92.4 },
-  { disease: "Tomato Early Blight", confidence: 4.1 },
-  { disease: "Tomato Septoria Leaf Spot", confidence: 2.3 },
-  { disease: "Tomato Healthy", confidence: 1.2 },
-];
+/**
+ * Apply domain-shift transforms to an image using an offscreen canvas.
+ * Returns a Promise that resolves to a Blob (image/png).
+ */
+function applyDomainShift(file, { brightness, contrast, blur, noise }) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+
+      // brightness & contrast via CSS filter on canvas
+      const bVal = 1 + (brightness - 50) / 50; // 0→0, 50→1, 100→2
+      const cVal = 1 + (contrast - 50) / 50;
+      ctx.filter = `brightness(${bVal}) contrast(${cVal}) blur(${(blur / 100) * 4}px)`;
+      ctx.drawImage(img, 0, 0);
+      ctx.filter = "none";
+
+      // Gaussian-ish noise
+      if (noise > 0) {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imageData.data;
+        const std = (noise / 100) * 50;
+        for (let i = 0; i < d.length; i += 4) {
+          // Box-Muller approximation
+          const u1 = Math.random() || 0.001;
+          const u2 = Math.random();
+          const n = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2) * std;
+          d[i] = Math.min(255, Math.max(0, d[i] + n));
+          d[i + 1] = Math.min(255, Math.max(0, d[i + 1] + n));
+          d[i + 2] = Math.min(255, Math.max(0, d[i + 2] + n));
+        }
+        ctx.putImageData(imageData, 0, 0);
+      }
+
+      canvas.toBlob((blob) => resolve(blob), "image/png");
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
 
 export default function LiveDemo() {
   const [image, setImage] = useState(null);
   const [preview, setPreview] = useState(null);
   const [predictions, setPredictions] = useState(null);
+  const [gradcam, setGradcam] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
+
+  // Domain shift state
+  const [shiftEnabled, setShiftEnabled] = useState(false);
+  const [shiftParams, setShiftParams] = useState({
+    brightness: 50,
+    contrast: 50,
+    blur: 0,
+    noise: 0,
+  });
+  const [shiftLoading, setShiftLoading] = useState(false);
+  const shiftTimerRef = useRef(null);
 
   const handleFile = useCallback((file) => {
     if (!file || !file.type.startsWith("image/")) return;
     setImage(file);
     setPreview(URL.createObjectURL(file));
     setPredictions(null);
+    setGradcam(null);
+    setError(null);
+    setShiftEnabled(false);
+    setShiftParams({ brightness: 50, contrast: 50, blur: 0, noise: 0 });
   }, []);
 
   const handleDrop = useCallback(
@@ -40,20 +93,77 @@ export default function LiveDemo() {
     [handleFile]
   );
 
-  const handlePredict = useCallback(() => {
+  const callPredictAPI = useCallback(async (fileOrBlob) => {
+    const formData = new FormData();
+    formData.append("file", fileOrBlob, fileOrBlob.name || "image.png");
+
+    const res = await fetch("/api/predict", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null);
+      throw new Error(detail?.detail || `Server error (${res.status})`);
+    }
+
+    return res.json();
+  }, []);
+
+  const handlePredict = useCallback(async () => {
     if (!image) return;
     setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setPredictions(mockPredictions);
+    setError(null);
+    try {
+      const data = await callPredictAPI(image);
+      setPredictions(data.predictions || []);
+      setGradcam(data.gradcam || null);
+    } catch (err) {
+      setError(
+        err.message === "Failed to fetch"
+          ? "Cannot reach the API server. Please make sure the backend is running."
+          : err.message
+      );
+    } finally {
       setLoading(false);
-    }, 1500);
-  }, [image]);
+    }
+  }, [image, callPredictAPI]);
+
+  // Domain shift: re-predict when sliders change
+  const handleShiftChange = useCallback(
+    (key, value) => {
+      const next = { ...shiftParams, [key]: Number(value) };
+      setShiftParams(next);
+
+      if (!image || !predictions) return;
+
+      // Debounce 400ms
+      if (shiftTimerRef.current) clearTimeout(shiftTimerRef.current);
+      shiftTimerRef.current = setTimeout(async () => {
+        setShiftLoading(true);
+        try {
+          const blob = await applyDomainShift(image, next);
+          const data = await callPredictAPI(blob);
+          setPredictions(data.predictions || []);
+          setGradcam(data.gradcam || null);
+        } catch {
+          // keep existing predictions on shift failure
+        } finally {
+          setShiftLoading(false);
+        }
+      }, 400);
+    },
+    [image, predictions, shiftParams, callPredictAPI]
+  );
 
   const reset = () => {
     setImage(null);
     setPreview(null);
     setPredictions(null);
+    setGradcam(null);
+    setError(null);
+    setShiftEnabled(false);
+    setShiftParams({ brightness: 50, contrast: 50, blur: 0, noise: 0 });
   };
 
   return (
@@ -165,6 +275,17 @@ export default function LiveDemo() {
                 )}
               </motion.button>
             )}
+
+            {/* Error message */}
+            {error && (
+              <motion.div
+                className="mt-4 p-4 bg-red-900/30 border border-red-800 rounded-xl text-red-400 text-sm"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+              >
+                {error}
+              </motion.div>
+            )}
           </motion.div>
 
           {/* Results area */}
@@ -184,10 +305,11 @@ export default function LiveDemo() {
                   className="p-6 bg-gray-900/50 border border-gray-800 rounded-2xl"
                 >
                   <h3 className="text-lg font-bold mb-1 text-[#00e676]">
-                    {predictions[0].disease}
+                    {predictions[0]?.disease}
                   </h3>
                   <p className="text-xs text-gray-500 mb-6">
-                    Top prediction with {predictions[0].confidence}% confidence
+                    Top prediction with {predictions[0]?.confidence}% confidence
+                    {shiftLoading && " (updating…)"}
                   </p>
 
                   <div className="space-y-4">
@@ -219,6 +341,18 @@ export default function LiveDemo() {
                     ))}
                   </div>
 
+                  {/* GradCAM heatmap */}
+                  {gradcam && (
+                    <div className="mt-6">
+                      <p className="text-xs text-gray-500 mb-2">GradCAM Heatmap</p>
+                      <img
+                        src={`data:image/png;base64,${gradcam}`}
+                        alt="GradCAM heatmap"
+                        className="w-full rounded-xl border border-gray-800"
+                      />
+                    </div>
+                  )}
+
                   <button
                     onClick={reset}
                     className="mt-6 w-full py-2.5 border border-gray-700 text-gray-400 rounded-xl hover:border-[#00e676]/50 hover:text-white transition-colors text-sm"
@@ -241,6 +375,68 @@ export default function LiveDemo() {
             </AnimatePresence>
           </motion.div>
         </div>
+
+        {/* Domain Shift Simulator */}
+        {predictions && (
+          <motion.div
+            className="mt-12"
+            initial="hidden"
+            animate="visible"
+            variants={fadeUp}
+            custom={3}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-[#c6f135]">
+                Domain Shift Simulator
+              </h2>
+              <button
+                onClick={() => setShiftEnabled((v) => !v)}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-full border transition-colors ${
+                  shiftEnabled
+                    ? "border-[#c6f135] text-[#c6f135] bg-[#c6f135]/10"
+                    : "border-gray-700 text-gray-500 hover:border-gray-600"
+                }`}
+              >
+                {shiftEnabled ? "Enabled" : "Enable"}
+              </button>
+            </div>
+
+            {shiftEnabled && (
+              <motion.div
+                className="p-6 bg-gray-900/50 border border-gray-800 rounded-2xl space-y-5"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+              >
+                {[
+                  { key: "brightness", label: "Brightness" },
+                  { key: "contrast", label: "Contrast" },
+                  { key: "blur", label: "Blur" },
+                  { key: "noise", label: "Noise" },
+                ].map(({ key, label }) => (
+                  <div key={key}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-gray-400">{label}</span>
+                      <span className="text-gray-500">{shiftParams[key]}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={shiftParams[key]}
+                      onChange={(e) => handleShiftChange(key, e.target.value)}
+                      className="w-full accent-[#c6f135]"
+                    />
+                  </div>
+                ))}
+                {shiftLoading && (
+                  <p className="text-xs text-gray-500 text-center animate-pulse">
+                    Re-analyzing with domain shift…
+                  </p>
+                )}
+              </motion.div>
+            )}
+          </motion.div>
+        )}
       </div>
     </div>
   );
