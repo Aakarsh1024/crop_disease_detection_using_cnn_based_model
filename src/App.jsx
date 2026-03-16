@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
 import FloatingMic from "./components/FloatingMic";
 import Home from "./pages/Home";
 import Abstract from "./pages/Abstract";
@@ -9,6 +10,7 @@ import Results from "./pages/Results";
 import LiveDemo from "./pages/LiveDemo";
 import Comparison from "./pages/Comparison";
 import VoiceAssistant from "./pages/VoiceAssistant";
+import NotFound from "./pages/NotFound";
 
 export default function App() {
   return (
@@ -24,8 +26,10 @@ export default function App() {
           <Route path="/live-demo" element={<LiveDemo />} />
           <Route path="/comparison" element={<Comparison />} />
           <Route path="/voice-assistant" element={<VoiceAssistant />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
+      <Footer />
       <FloatingMic />
     </div>
   );
