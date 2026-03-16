@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { API_URL } from "../config";
 import {
   BarChart,
   Bar,
@@ -26,7 +27,7 @@ export default function Dataset() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch("/api/dataset-info")
+    fetch(`${API_URL}/api/dataset-info`)
       .then((res) => {
         if (!res.ok) throw new Error(`Server error (${res.status})`);
         return res.json();

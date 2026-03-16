@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { API_URL } from "../config";
 import {
   RadarChart,
   PolarGrid,
@@ -71,7 +72,7 @@ export default function Comparison() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch("/api/models")
+    fetch(`${API_URL}/api/models`)
       .then((res) => {
         if (!res.ok) throw new Error(`Server error (${res.status})`);
         return res.json();
