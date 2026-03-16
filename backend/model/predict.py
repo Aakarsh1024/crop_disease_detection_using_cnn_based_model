@@ -79,7 +79,7 @@ _model = None
 _using_mock = False
 
 
-def _format_class_name(raw: str) -> str:
+def format_class_name(raw: str) -> str:
     """Convert raw class name to human-readable format."""
     parts = raw.split("___")
     crop = parts[0].replace("_", " ")
@@ -181,7 +181,7 @@ def predict(image: Image.Image, top_k: int = 5) -> list[dict]:
     results = []
     for prob, idx in zip(top_probs, top_indices):
         results.append({
-            "disease": _format_class_name(CLASS_NAMES[idx.item()]),
+            "disease": format_class_name(CLASS_NAMES[idx.item()]),
             "confidence": round(prob.item() * 100, 2),
         })
 
@@ -204,16 +204,15 @@ def get_model_and_layer():
 def _mock_predictions(top_k: int = 5) -> list[dict]:
     """Generate plausible mock predictions for demo mode."""
     indices = random.sample(range(NUM_CLASSES), min(top_k, NUM_CLASSES))
-    names = [_format_class_name(CLASS_NAMES[i]) for i in indices]
+    names = [format_class_name(CLASS_NAMES[i]) for i in indices]
 
-    confidences = sorted(
-        [random.uniform(1, 95) for _ in names],
-        reverse=True,
-    )
-    remaining = 100.0 - sum(confidences)
-    confidences[0] += remaining if remaining > 0 else 0
+    # Generate Dirichlet-distributed scores so they are realistic
+    raw = [random.random() ** 0.5 for _ in names]
+    raw.sort(reverse=True)
+    total = sum(raw)
+    confidences = [round((r / total) * 100, 2) for r in raw]
 
     return [
-        {"disease": name, "confidence": round(conf, 2)}
+        {"disease": name, "confidence": conf}
         for name, conf in zip(names, confidences)
     ]

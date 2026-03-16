@@ -18,7 +18,7 @@ from backend.model.predict import (
     preprocess_image,
     get_model_and_layer,
     CLASS_NAMES,
-    _format_class_name,
+    format_class_name,
 )
 from backend.utils.gradcam import generate_gradcam_base64
 
@@ -165,7 +165,7 @@ async def get_dataset_info():
     """
     Return dataset statistics for the PlantVillage dataset.
     """
-    class_list = [_format_class_name(c) for c in CLASS_NAMES]
+    class_list = [format_class_name(c) for c in CLASS_NAMES]
 
     return {
         "name": "PlantVillage Dataset",
