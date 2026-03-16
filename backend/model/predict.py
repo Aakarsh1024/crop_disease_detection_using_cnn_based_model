@@ -122,7 +122,7 @@ def load_model() -> torch.nn.Module:
     model = build_efficientnet()
 
     if os.path.isfile(MODEL_PATH):
-        state = torch.load(MODEL_PATH, map_location="cpu")
+        state = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
         model.load_state_dict(state)
         _using_mock = False
     else:
