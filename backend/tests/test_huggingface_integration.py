@@ -77,6 +77,7 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
                 predictions = predict_module.predict(Image.new("RGB", (224, 224)), top_k=3)
 
             self.assertEqual(len(predictions), 3)
+            self.assertTrue(predict_module._using_mock)
             self.assertTrue(all("disease" in p and "confidence" in p for p in predictions))
 
     def test_results_endpoint_returns_hf_results_json(self):
