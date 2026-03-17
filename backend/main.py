@@ -12,6 +12,7 @@ import json
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from huggingface_hub import hf_hub_download
 from PIL import Image
 
@@ -32,17 +33,10 @@ app = FastAPI(
 
 HF_REPO_ID = "aakarshhhhh/cropguard-model"
 
-# ---------------------------------------------------------------------------
-# CORS – allow the React frontend (and any other origin during development)
-# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://cropdiseasedetectionusingcnnbasedmo.vercel.app",
-        "http://localhost:3000",
-        "*",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -101,6 +95,18 @@ async def predict_disease(file: UploadFile = File(...)):
         "confidence": predictions[0]["confidence"] if predictions else 0,
         "gradcam": gradcam_image,
     }
+
+
+@app.options("/api/predict")
+async def predict_options():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
