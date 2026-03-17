@@ -68,13 +68,19 @@ async def predict_disease(file: UploadFile = File(...)):
             detail="Could not read the uploaded image.",
         )
 
+    print(
+        f"[api/predict] Prediction started for file={file.filename}, "
+        f"content_type={file.content_type}"
+    )
+
     try:
         predictions = predict(image, top_k=5)
-    except Exception:
+    except Exception as e:
+        print(f"[api/predict] Prediction error: {e}")
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail="Prediction failed. Please try again.",
+            detail=str(e),
         )
 
     # Attempt GradCAM generation (non-critical – skip on error)

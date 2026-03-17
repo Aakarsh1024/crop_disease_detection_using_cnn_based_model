@@ -9,6 +9,7 @@ mock-data fallback when no trained weights are available.
 import os
 import random
 import json
+import traceback
 
 import numpy as np
 import torch
@@ -63,7 +64,7 @@ DEFAULT_CLASS_NAMES = [
 CLASS_NAMES = DEFAULT_CLASS_NAMES
 NUM_CLASSES = len(CLASS_NAMES)
 
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "weights")
+MODEL_DIR = "/tmp/model"
 MODEL_PATH = os.path.join(MODEL_DIR, "efficientnet_b0_plant.pth")
 HF_REPO_ID = "aakarshhhhh/cropguard-model"
 HF_MODEL_FILENAME = "efficientnet_b0_plant.pth"
@@ -96,23 +97,29 @@ def _initialize_assets() -> None:
             repo_id=HF_REPO_ID,
             filename=HF_MODEL_FILENAME,
             local_dir=MODEL_DIR,
+            force_download=False,
         )
-    except Exception:
-        pass
+        print(f"[predict] Model weights ready at: {MODEL_PATH}")
+    except Exception as e:
+        print(f"[predict] Failed to download model weights from HuggingFace: {e}")
+        traceback.print_exc()
 
     try:
         class_names_path = hf_hub_download(
             repo_id=HF_REPO_ID,
             filename=HF_CLASS_NAMES_FILENAME,
             local_dir=MODEL_DIR,
+            force_download=False,
         )
         with open(class_names_path, "r", encoding="utf-8") as f:
             class_names = json.load(f)
         if isinstance(class_names, list) and class_names:
             CLASS_NAMES = class_names
             NUM_CLASSES = len(CLASS_NAMES)
-    except Exception:
-        pass
+            print(f"[predict] Loaded {NUM_CLASSES} class names from HuggingFace.")
+    except Exception as e:
+        print(f"[predict] Failed to download or parse class names: {e}")
+        traceback.print_exc()
 
 
 def format_class_name(raw: str) -> str:
@@ -157,12 +164,22 @@ def load_model() -> torch.nn.Module:
 
     model = build_efficientnet()
 
-    if os.path.isfile(MODEL_PATH):
-        state = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
-        model.load_state_dict(state)
-        _using_mock = False
-    else:
+    try:
+        if os.path.isfile(MODEL_PATH):
+            state = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
+            model.load_state_dict(state)
+            _using_mock = False
+            print(f"[predict] Loaded model weights from: {MODEL_PATH}")
+        else:
+            _using_mock = True
+            print(
+                f"[predict] Model weights not found at {MODEL_PATH}. "
+                "Using mock predictions."
+            )
+    except Exception as e:
         _using_mock = True
+        print(f"[predict] Failed to load model weights, using mock predictions: {e}")
+        traceback.print_exc()
 
     model.eval()
     _model = model
