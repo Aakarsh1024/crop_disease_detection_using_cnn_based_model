@@ -42,6 +42,11 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    print("Server started - model will load on first request")
+
+
 # ---------------------------------------------------------------------------
 # POST /api/predict
 # ---------------------------------------------------------------------------
