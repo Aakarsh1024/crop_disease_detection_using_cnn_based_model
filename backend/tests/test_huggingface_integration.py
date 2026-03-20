@@ -71,14 +71,20 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
 
             predict_module._model = None
             predict_module._using_mock = False
+            flag_seen_during_load = {"value": False}
+
+            def fake_torch_load(*args, **kwargs):
+                flag_seen_during_load["value"] = predict_module._model_loading
+                raise RuntimeError("bad weights")
 
             with mock.patch("huggingface_hub.hf_hub_download", side_effect=fake_download), mock.patch.object(
-                predict_module.torch, "load", side_effect=RuntimeError("bad weights")
+                predict_module.torch, "load", side_effect=fake_torch_load
             ):
                 predictions = predict_module.predict(Image.new("RGB", (224, 224)), top_k=3)
 
             self.assertEqual(len(predictions), 3)
             self.assertTrue(predict_module._using_mock)
+            self.assertTrue(flag_seen_during_load["value"])
             self.assertFalse(predict_module._model_loading)
             self.assertTrue(all("disease" in p and "confidence" in p for p in predictions))
 
