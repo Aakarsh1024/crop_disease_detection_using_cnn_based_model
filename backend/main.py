@@ -47,6 +47,16 @@ async def startup_event():
     print("Server started - model will load on first request")
 
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "crop-disease-detection-api"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
 # ---------------------------------------------------------------------------
 # POST /api/predict
 # ---------------------------------------------------------------------------
