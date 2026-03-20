@@ -189,6 +189,34 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
                 "Server started - model will load on first request"
             )
 
+    def test_root_and_health_endpoints(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = os.path.join(tmpdir, "efficientnet_b0_plant.pth")
+            class_names_path = os.path.join(tmpdir, "class_names.json")
+
+            with open(model_path, "wb") as f:
+                f.write(b"model")
+            with open(class_names_path, "w", encoding="utf-8") as f:
+                json.dump(["Crop___Healthy"], f)
+
+            def fake_download(repo_id, filename, **kwargs):
+                if filename == "efficientnet_b0_plant.pth":
+                    return model_path
+                if filename == "class_names.json":
+                    return class_names_path
+                raise AssertionError(f"Unexpected filename: {filename}")
+
+            with mock.patch("huggingface_hub.hf_hub_download", side_effect=fake_download):
+                main_module = importlib.import_module("backend.main")
+                root_response = asyncio.run(main_module.root())
+                health_response = asyncio.run(main_module.health_check())
+
+            self.assertEqual(
+                root_response,
+                {"status": "ok", "service": "crop-disease-detection-api"},
+            )
+            self.assertEqual(health_response, {"status": "healthy"})
+
     def test_load_model_forces_cpu_threads_and_checkpoint_cleanup(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = os.path.join(tmpdir, "efficientnet_b0_plant.pth")
