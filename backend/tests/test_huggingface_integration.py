@@ -17,7 +17,7 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
         sys.modules.pop("backend.main", None)
         sys.modules.pop("backend.model.predict", None)
 
-    def test_predict_import_is_lazy_and_does_not_download_model(self):
+    def test_import_does_not_trigger_model_download(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = os.path.join(tmpdir, "efficientnet_b0_plant.pth")
             class_names_path = os.path.join(tmpdir, "class_names.json")

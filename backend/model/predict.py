@@ -11,7 +11,7 @@ import random
 import json
 import traceback
 import gc
-import time
+import threading
 
 import numpy as np
 import torch
@@ -87,6 +87,7 @@ preprocess = transforms.Compose([
 _model = None
 _using_mock = False
 _model_loading = False
+_model_load_lock = threading.Lock()
 
 
 def format_class_name(raw: str) -> str:
@@ -117,56 +118,55 @@ def load_model():
     global _model, _using_mock, _model_loading, CLASS_NAMES, NUM_CLASSES, MODEL_PATH
     if _model is not None:
         return _model
-    if _model_loading:
-        while _model_loading:
-            time.sleep(0.05)
+    with _model_load_lock:
+        if _model is not None:
+            return _model
+        _model_loading = True
+        try:
+            os.makedirs(MODEL_DIR, exist_ok=True)
+            MODEL_PATH = hf_hub_download(
+                repo_id=HF_REPO_ID,
+                filename=HF_MODEL_FILENAME,
+                local_dir=MODEL_DIR,
+                force_download=False,
+            )
+            class_path = hf_hub_download(
+                repo_id=HF_REPO_ID,
+                filename=HF_CLASS_NAMES_FILENAME,
+                local_dir=MODEL_DIR,
+                force_download=False,
+            )
+            with open(class_path, "r", encoding="utf-8") as f:
+                CLASS_NAMES = json.load(f)
+            NUM_CLASSES = len(CLASS_NAMES)
+
+            # Detect num_classes from checkpoint
+            checkpoint = torch.load(MODEL_PATH, map_location="cpu",
+                                    weights_only=True)
+            num_classes = checkpoint["classifier.1.weight"].shape[0]
+            print(f"Loading model with {num_classes} classes")
+
+            # Build model with correct num_classes
+            model = models.efficientnet_b0(weights=None)
+            in_features = model.classifier[1].in_features
+            model.classifier = torch.nn.Sequential(
+                torch.nn.Dropout(p=0.4),
+                torch.nn.Linear(in_features, num_classes)
+            )
+            model.load_state_dict(checkpoint)
+            model.eval()
+            _using_mock = False
+            _model = model
+            print(f"Model loaded with {num_classes} classes at 99.85% accuracy!")
+        except Exception as e:
+            print(f"Model load failed: {e}, using mock")
+            _using_mock = True
+            _model = build_efficientnet()
+            _model.eval()
+        finally:
+            gc.collect()
+            _model_loading = False
         return _model
-    _model_loading = True
-    try:
-        os.makedirs(MODEL_DIR, exist_ok=True)
-        MODEL_PATH = hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename=HF_MODEL_FILENAME,
-            local_dir=MODEL_DIR,
-            force_download=False,
-        )
-        class_path = hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename=HF_CLASS_NAMES_FILENAME,
-            local_dir=MODEL_DIR,
-            force_download=False,
-        )
-        with open(class_path, "r", encoding="utf-8") as f:
-            CLASS_NAMES = json.load(f)
-        NUM_CLASSES = len(CLASS_NAMES)
-
-        # Detect num_classes from checkpoint
-        checkpoint = torch.load(MODEL_PATH, map_location="cpu",
-                                weights_only=True)
-        num_classes = checkpoint["classifier.1.weight"].shape[0]
-        print(f"Loading model with {num_classes} classes")
-
-        # Build model with correct num_classes
-        model = models.efficientnet_b0(weights=None)
-        in_features = model.classifier[1].in_features
-        model.classifier = torch.nn.Sequential(
-            torch.nn.Dropout(p=0.4),
-            torch.nn.Linear(in_features, num_classes)
-        )
-        model.load_state_dict(checkpoint)
-        model.eval()
-        _using_mock = False
-        _model = model
-        print(f"Model loaded with {num_classes} classes at 99.85% accuracy!")
-    except Exception as e:
-        print(f"Model load failed: {e}, using mock")
-        _using_mock = True
-        _model = build_efficientnet()
-        _model.eval()
-    finally:
-        gc.collect()
-        _model_loading = False
-    return _model
 
 
 def preprocess_image(image: Image.Image) -> torch.Tensor:
