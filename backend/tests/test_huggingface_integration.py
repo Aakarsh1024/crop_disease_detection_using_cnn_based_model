@@ -10,6 +10,7 @@ from unittest import mock
 from fastapi import HTTPException
 from PIL import Image
 from starlette.datastructures import UploadFile
+import torch
 
 
 class HuggingFaceIntegrationTests(unittest.TestCase):
@@ -187,6 +188,63 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
             mock_print.assert_called_once_with(
                 "Server started - model will load on first request"
             )
+
+    def test_load_model_forces_cpu_threads_and_checkpoint_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = os.path.join(tmpdir, "efficientnet_b0_plant.pth")
+            class_names_path = os.path.join(tmpdir, "class_names.json")
+            with open(model_path, "wb") as f:
+                f.write(b"model")
+            with open(class_names_path, "w", encoding="utf-8") as f:
+                json.dump(["Crop___Healthy", "Crop___Disease"], f)
+
+            def fake_download(repo_id, filename, **kwargs):
+                if filename == "efficientnet_b0_plant.pth":
+                    return model_path
+                if filename == "class_names.json":
+                    return class_names_path
+                raise AssertionError(f"Unexpected filename: {filename}")
+
+            with mock.patch("huggingface_hub.hf_hub_download", side_effect=fake_download):
+                predict_module = importlib.import_module("backend.model.predict")
+
+            predict_module._model = None
+            predict_module._using_mock = False
+            fake_model = mock.MagicMock()
+            fake_model.classifier = [None, mock.Mock(in_features=4)]
+            fake_model.features = [mock.Mock()]
+            fake_model.float.return_value = fake_model
+            fake_model.to.return_value = fake_model
+            checkpoint = {"classifier.1.weight": torch.zeros((2, 4))}
+
+            with mock.patch("huggingface_hub.hf_hub_download", side_effect=fake_download), \
+                mock.patch.object(predict_module.models, "efficientnet_b0", return_value=fake_model), \
+                mock.patch.object(predict_module.torch, "load", return_value=checkpoint), \
+                mock.patch.object(predict_module.torch, "set_num_threads") as mock_set_threads, \
+                mock.patch.object(predict_module.gc, "collect") as mock_gc:
+                loaded_model = predict_module.load_model()
+
+            self.assertIs(loaded_model, fake_model)
+            fake_model.float.assert_called_once()
+            fake_model.to.assert_called_once_with(predict_module.device)
+            mock_set_threads.assert_called_once_with(1)
+            self.assertGreaterEqual(mock_gc.call_count, 2)
+
+    def test_predict_uses_inference_mode(self):
+        predict_module = importlib.import_module("backend.model.predict")
+        predict_module._using_mock = False
+        fake_model = mock.MagicMock()
+        fake_logits = torch.tensor([[0.2, 0.8]], dtype=torch.float32)
+        fake_model.return_value = fake_logits
+        predict_module.CLASS_NAMES = ["Crop___Healthy", "Crop___Disease"]
+
+        with mock.patch.object(predict_module, "load_model", return_value=fake_model), \
+            mock.patch.object(predict_module, "preprocess_image", return_value=torch.zeros((1, 3, 224, 224))), \
+            mock.patch.object(predict_module.torch, "inference_mode") as mock_inference_mode:
+            predictions = predict_module.predict(Image.new("RGB", (224, 224)), top_k=1)
+
+        mock_inference_mode.assert_called_once()
+        self.assertEqual(len(predictions), 1)
 
 
 if __name__ == "__main__":

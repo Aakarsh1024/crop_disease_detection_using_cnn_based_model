@@ -88,6 +88,7 @@ _model = None
 _using_mock = False
 _model_loading = False
 _model_load_lock = threading.Lock()
+device = torch.device("cpu")
 
 
 def format_class_name(raw: str) -> str:
@@ -154,7 +155,12 @@ def load_model():
                 torch.nn.Linear(in_features, num_classes)
             )
             model.load_state_dict(checkpoint)
+            model = model.float()
+            model = model.to(device)
             model.eval()
+            torch.set_num_threads(1)
+            del checkpoint
+            gc.collect()
             _using_mock = False
             _model = model
             print(f"Model loaded with {num_classes} classes at 99.85% accuracy!")
@@ -206,9 +212,9 @@ def predict(image: Image.Image, top_k: int = 5) -> list[dict]:
     if _using_mock:
         return _mock_predictions(top_k)
 
-    tensor = preprocess_image(image)
+    tensor = preprocess_image(image).to(device)
 
-    with torch.no_grad():
+    with torch.inference_mode():
         logits = model(tensor)
         probs = F.softmax(logits, dim=1)[0]
 
