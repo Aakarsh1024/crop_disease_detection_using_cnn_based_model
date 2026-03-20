@@ -10,6 +10,8 @@ import os
 import random
 import json
 import traceback
+import gc
+import time
 
 import numpy as np
 import torch
@@ -84,42 +86,7 @@ preprocess = transforms.Compose([
 # Module-level model cache
 _model = None
 _using_mock = False
-
-
-def _initialize_assets() -> None:
-    """Download model weights and class names from HuggingFace."""
-    global CLASS_NAMES, NUM_CLASSES, MODEL_PATH
-
-    os.makedirs(MODEL_DIR, exist_ok=True)
-
-    try:
-        MODEL_PATH = hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename=HF_MODEL_FILENAME,
-            local_dir=MODEL_DIR,
-            force_download=False,
-        )
-        print(f"[predict] Model weights ready at: {MODEL_PATH}")
-    except Exception as e:
-        print(f"[predict] Failed to download model weights from HuggingFace: {e}")
-        traceback.print_exc()
-
-    try:
-        class_names_path = hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename=HF_CLASS_NAMES_FILENAME,
-            local_dir=MODEL_DIR,
-            force_download=False,
-        )
-        with open(class_names_path, "r", encoding="utf-8") as f:
-            class_names = json.load(f)
-        if isinstance(class_names, list) and class_names:
-            CLASS_NAMES = class_names
-            NUM_CLASSES = len(CLASS_NAMES)
-            print(f"[predict] Loaded {NUM_CLASSES} class names from HuggingFace.")
-    except Exception as e:
-        print(f"[predict] Failed to download or parse class names: {e}")
-        traceback.print_exc()
+_model_loading = False
 
 
 def format_class_name(raw: str) -> str:
@@ -147,32 +114,34 @@ def build_efficientnet(num_classes: int = NUM_CLASSES) -> torch.nn.Module:
 
 
 def load_model():
-    global _model, _using_mock
+    global _model, _using_mock, _model_loading, CLASS_NAMES, NUM_CLASSES, MODEL_PATH
     if _model is not None:
         return _model
+    if _model_loading:
+        while _model_loading:
+            time.sleep(0.05)
+        return _model
+    _model_loading = True
     try:
-        from huggingface_hub import hf_hub_download
-        import json
-
-        # Download model weights
-        model_path = hf_hub_download(
-            repo_id="aakarshhhhh/cropguard-model",
-            filename="efficientnet_b0_plant.pth",
-            local_dir="/tmp/model"
+        os.makedirs(MODEL_DIR, exist_ok=True)
+        MODEL_PATH = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename=HF_MODEL_FILENAME,
+            local_dir=MODEL_DIR,
+            force_download=False,
         )
-
-        # Download class names
         class_path = hf_hub_download(
-            repo_id="aakarshhhhh/cropguard-model",
-            filename="class_names.json",
-            local_dir="/tmp/model"
+            repo_id=HF_REPO_ID,
+            filename=HF_CLASS_NAMES_FILENAME,
+            local_dir=MODEL_DIR,
+            force_download=False,
         )
-        with open(class_path) as f:
-            global CLASS_NAMES
+        with open(class_path, "r", encoding="utf-8") as f:
             CLASS_NAMES = json.load(f)
+        NUM_CLASSES = len(CLASS_NAMES)
 
         # Detect num_classes from checkpoint
-        checkpoint = torch.load(model_path, map_location="cpu",
+        checkpoint = torch.load(MODEL_PATH, map_location="cpu",
                                 weights_only=True)
         num_classes = checkpoint["classifier.1.weight"].shape[0]
         print(f"Loading model with {num_classes} classes")
@@ -194,6 +163,9 @@ def load_model():
         _using_mock = True
         _model = build_efficientnet()
         _model.eval()
+    finally:
+        gc.collect()
+        _model_loading = False
     return _model
 
 
@@ -280,6 +252,3 @@ def _mock_predictions(top_k: int = 5) -> list[dict]:
         {"disease": name, "confidence": conf}
         for name, conf in zip(names, confidences)
     ]
-
-
-_initialize_assets()

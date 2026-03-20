@@ -17,7 +17,7 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
         sys.modules.pop("backend.main", None)
         sys.modules.pop("backend.model.predict", None)
 
-    def test_predict_initializes_model_and_classes_from_hf(self):
+    def test_predict_import_is_lazy_and_does_not_download_model(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = os.path.join(tmpdir, "efficientnet_b0_plant.pth")
             class_names_path = os.path.join(tmpdir, "class_names.json")
@@ -39,20 +39,8 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
             with mock.patch("huggingface_hub.hf_hub_download", side_effect=fake_download):
                 predict_module = importlib.import_module("backend.model.predict")
 
-            self.assertEqual(
-                predict_module.CLASS_NAMES,
-                ["Crop___Healthy", "Crop___Disease"],
-            )
-            self.assertEqual(predict_module.NUM_CLASSES, 2)
-            self.assertEqual(predict_module.MODEL_PATH, model_path)
-            self.assertIn(
-                (
-                    "aakarshhhhh/cropguard-model",
-                    "efficientnet_b0_plant.pth",
-                    {"local_dir": "/tmp/model", "force_download": False},
-                ),
-                calls,
-            )
+            self.assertEqual(calls, [])
+            self.assertFalse(predict_module._model_loading)
 
     def test_predict_falls_back_to_mock_when_weights_load_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -91,6 +79,7 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
 
             self.assertEqual(len(predictions), 3)
             self.assertTrue(predict_module._using_mock)
+            self.assertFalse(predict_module._model_loading)
             self.assertTrue(all("disease" in p and "confidence" in p for p in predictions))
 
     def test_results_endpoint_returns_hf_results_json(self):
@@ -166,6 +155,32 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
 
             self.assertEqual(ctx.exception.status_code, 500)
             self.assertEqual(ctx.exception.detail, "boom")
+
+    def test_startup_event_logs_lazy_loading_message(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = os.path.join(tmpdir, "efficientnet_b0_plant.pth")
+            class_names_path = os.path.join(tmpdir, "class_names.json")
+
+            with open(model_path, "wb") as f:
+                f.write(b"model")
+            with open(class_names_path, "w", encoding="utf-8") as f:
+                json.dump(["Crop___Healthy"], f)
+
+            def fake_download(repo_id, filename, **kwargs):
+                if filename == "efficientnet_b0_plant.pth":
+                    return model_path
+                if filename == "class_names.json":
+                    return class_names_path
+                raise AssertionError(f"Unexpected filename: {filename}")
+
+            with mock.patch("huggingface_hub.hf_hub_download", side_effect=fake_download):
+                main_module = importlib.import_module("backend.main")
+
+            with mock.patch("builtins.print") as mock_print:
+                asyncio.run(main_module.startup_event())
+            mock_print.assert_called_once_with(
+                "Server started - model will load on first request"
+            )
 
 
 if __name__ == "__main__":
