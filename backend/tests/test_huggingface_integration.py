@@ -57,13 +57,26 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
     def test_predict_falls_back_to_mock_when_weights_load_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = os.path.join(tmpdir, "efficientnet_b0_plant.pth")
+            class_names_path = os.path.join(tmpdir, "class_names.json")
             with open(model_path, "wb") as f:
                 f.write(b"invalid-model-content")
+            with open(class_names_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    [
+                        "Crop___Healthy",
+                        "Crop___DiseaseA",
+                        "Crop___DiseaseB",
+                        "Crop___DiseaseC",
+                    ],
+                    f,
+                )
 
             def fake_download(repo_id, filename, **kwargs):
                 if filename == "efficientnet_b0_plant.pth":
                     return model_path
-                raise RuntimeError("class names unavailable")
+                if filename == "class_names.json":
+                    return class_names_path
+                raise AssertionError(f"Unexpected filename: {filename}")
 
             with mock.patch("huggingface_hub.hf_hub_download", side_effect=fake_download):
                 predict_module = importlib.import_module("backend.model.predict")
@@ -71,7 +84,7 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
             predict_module._model = None
             predict_module._using_mock = False
 
-            with mock.patch.object(
+            with mock.patch("huggingface_hub.hf_hub_download", side_effect=fake_download), mock.patch.object(
                 predict_module.torch, "load", side_effect=RuntimeError("bad weights")
             ):
                 predictions = predict_module.predict(Image.new("RGB", (224, 224)), top_k=3)
@@ -93,6 +106,7 @@ class HuggingFaceIntegrationTests(unittest.TestCase):
 
             expected_results = {
                 "accuracy": 99.81,
+                "test_accuracy": 99.85,
                 "precision": 99.8,
                 "recall": 99.8,
                 "f1_score": 99.8,
