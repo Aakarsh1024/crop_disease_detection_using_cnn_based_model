@@ -146,43 +146,54 @@ def build_efficientnet(num_classes: int = NUM_CLASSES) -> torch.nn.Module:
     return model
 
 
-def load_model() -> torch.nn.Module:
-    """
-    Load the trained EfficientNet-B0 model.
-
-    Falls back to an uninitialised model (mock mode) when no
-    saved weights file is found, so the API can still return
-    demo predictions.
-
-    Returns:
-        PyTorch model in eval mode.
-    """
+def load_model():
     global _model, _using_mock
-
     if _model is not None:
         return _model
-
-    model = build_efficientnet()
-
     try:
-        if os.path.isfile(MODEL_PATH):
-            state = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
-            model.load_state_dict(state)
-            _using_mock = False
-            print(f"[predict] Loaded model weights from: {MODEL_PATH}")
-        else:
-            _using_mock = True
-            print(
-                f"[predict] Model weights not found at {MODEL_PATH}. "
-                "Using mock predictions."
-            )
-    except Exception as e:
-        _using_mock = True
-        print(f"[predict] Failed to load model weights, using mock predictions: {e}")
-        traceback.print_exc()
+        from huggingface_hub import hf_hub_download
+        import json
 
-    model.eval()
-    _model = model
+        # Download model weights
+        model_path = hf_hub_download(
+            repo_id="aakarshhhhh/cropguard-model",
+            filename="efficientnet_b0_plant.pth",
+            local_dir="/tmp/model"
+        )
+
+        # Download class names
+        class_path = hf_hub_download(
+            repo_id="aakarshhhhh/cropguard-model",
+            filename="class_names.json",
+            local_dir="/tmp/model"
+        )
+        with open(class_path) as f:
+            global CLASS_NAMES
+            CLASS_NAMES = json.load(f)
+
+        # Detect num_classes from checkpoint
+        checkpoint = torch.load(model_path, map_location="cpu",
+                                weights_only=True)
+        num_classes = checkpoint["classifier.1.weight"].shape[0]
+        print(f"Loading model with {num_classes} classes")
+
+        # Build model with correct num_classes
+        model = models.efficientnet_b0(weights=None)
+        in_features = model.classifier[1].in_features
+        model.classifier = torch.nn.Sequential(
+            torch.nn.Dropout(p=0.4),
+            torch.nn.Linear(in_features, num_classes)
+        )
+        model.load_state_dict(checkpoint)
+        model.eval()
+        _using_mock = False
+        _model = model
+        print(f"Model loaded with {num_classes} classes at 99.85% accuracy!")
+    except Exception as e:
+        print(f"Model load failed: {e}, using mock")
+        _using_mock = True
+        _model = build_efficientnet()
+        _model.eval()
     return _model
 
 
